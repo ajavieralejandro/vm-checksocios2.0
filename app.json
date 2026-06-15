@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "vm-checksocios-scanner",
+    "name": "CheckSocios 2.0",
     "slug": "vm-checksocios-scanner",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -25,6 +25,14 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "CheckSocios necesita acceso a la cámara para escanear códigos QR de socios.",
+          "barcodeScannerEnabled": true,
+          "recordAudioAndroid": false
+        }
+      ],
       [
         "expo-splash-screen",
         {

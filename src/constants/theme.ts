@@ -7,6 +7,13 @@ import '@/global.css';
 
 import { Platform } from 'react-native';
 
+export const ScanStatusColors = {
+  allowed: '#16A34A',
+  warning: '#CA8A04',
+  rejected: '#DC2626',
+  neutral: '#6B7280',
+} as const;
+
 export const Colors = {
   light: {
     text: '#000000',
