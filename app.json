@@ -29,7 +29,6 @@
         "expo-camera",
         {
           "cameraPermission": "CheckSocios necesita acceso a la cámara para escanear códigos QR de socios.",
-          "barcodeScannerEnabled": true,
           "recordAudioAndroid": false
         }
       ],
@@ -45,8 +44,7 @@
       ]
     ],
     "experiments": {
-      "typedRoutes": true,
-      "reactCompiler": true
+      "typedRoutes": false
     }
   }
 }
