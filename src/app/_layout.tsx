@@ -10,6 +10,8 @@ export default function RootLayout() {
         <Stack.Screen name="index" />
         <Stack.Screen name="manual" />
         <Stack.Screen name="result" />
+        <Stack.Screen name="status" />
+        <Stack.Screen name="credits/preview" />
         <Stack.Screen name="settings" />
       </Stack>
     </>

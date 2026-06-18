@@ -6,11 +6,14 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import {
-  apiBaseUrl,
   appVersion,
+  creditsApiBaseUrl,
+  scannerApiToken,
   scannerPoint,
-  validateConfig,
-} from '@/constants/config';
+  validateCreditsConfig,
+  validateMemberConfig,
+  vmServerApiBaseUrl,
+} from '@/config/env';
 import { Spacing } from '@/constants/theme';
 
 function ConfigRow({ label, value }: { label: string; value: string }) {
@@ -22,9 +25,22 @@ function ConfigRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+function maskToken(token: string | undefined): string {
+  if (!token) {
+    return '(no configurado)';
+  }
+
+  if (token.length <= 8) {
+    return '********';
+  }
+
+  return `${token.slice(0, 4)}...${token.slice(-4)}`;
+}
+
 export function SettingsScreen() {
   const router = useRouter();
-  const config = validateConfig();
+  const creditsConfig = validateCreditsConfig();
+  const memberConfig = validateMemberConfig();
 
   return (
     <ThemedView style={styles.container}>
@@ -35,18 +51,35 @@ export function SettingsScreen() {
             Valores de entorno para operadores internos. No se editan desde la app en esta fase.
           </ThemedText>
 
-          {!config.isValid ? (
+          {!creditsConfig.isValid ? (
             <ThemedView style={styles.warningBox}>
-              <ThemedText type="smallBold">Advertencia</ThemedText>
+              <ThemedText type="smallBold">Créditos</ThemedText>
               <ThemedText type="small" themeColor="textSecondary">
-                {config.errorMessage}
+                {creditsConfig.errorMessage}
               </ThemedText>
             </ThemedView>
           ) : null}
 
+          {!memberConfig.isValid ? (
+            <ThemedView style={styles.warningBox}>
+              <ThemedText type="smallBold">Socios / vmServer</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">
+                {memberConfig.errorMessage}
+              </ThemedText>
+            </ThemedView>
+          ) : null}
+
+          <ThemedText type="smallBold">Créditos (vm-creditos-api)</ThemedText>
           <ConfigRow
-            label="API base URL"
-            value={apiBaseUrl ?? '(no configurada)'}
+            label="Credits API base URL"
+            value={creditsApiBaseUrl ?? '(no configurada)'}
+          />
+          <ConfigRow label="Scanner API token" value={maskToken(scannerApiToken)} />
+
+          <ThemedText type="smallBold">Socios (vmServer)</ThemedText>
+          <ConfigRow
+            label="vmServer API base URL"
+            value={vmServerApiBaseUrl ?? '(no configurada)'}
           />
           <ConfigRow label="Punto de acceso" value={scannerPoint} />
           <ConfigRow label="Versión de la app" value={appVersion} />

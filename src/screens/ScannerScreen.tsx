@@ -7,12 +7,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { validateConfig } from '@/constants/config';
+import { validateCreditsConfig } from '@/config/env';
 import { Spacing } from '@/constants/theme';
-import { scanMemberAccess } from '@/services/memberAccessService';
-import type { MemberAccessScanResponse } from '@/types/scanner';
+import { previewWalletCreditQr } from '@/scanner/api/creditsScannerApi';
+import { parseQrPayload } from '@/scanner/qr/parseQrPayload';
 
 const SCAN_DEBOUNCE_MS = 2_500;
+const DEFAULT_CREDIT_AMOUNT = 1;
 
 export function ScannerScreen() {
   const router = useRouter();
@@ -22,7 +23,7 @@ export function ScannerScreen() {
   const [isFocused, setIsFocused] = useState(true);
   const lastScanRef = useRef<{ payload: string; timestamp: number } | null>(null);
 
-  const config = validateConfig();
+  const creditsConfig = validateCreditsConfig();
 
   useFocusEffect(
     useCallback(() => {
@@ -37,11 +38,11 @@ export function ScannerScreen() {
     }, []),
   );
 
-  const navigateToResult = useCallback(
-    (result: MemberAccessScanResponse) => {
+  const navigateToStatus = useCallback(
+    (title: string, message: string) => {
       router.push({
-        pathname: '/result',
-        params: { payload: JSON.stringify(result) },
+        pathname: '/status',
+        params: { title, message },
       });
     },
     [router],
@@ -66,12 +67,59 @@ export function ScannerScreen() {
 
       lastScanRef.current = { payload, timestamp: now };
       setIsProcessing(true);
-      setStatusMessage('Validando ingreso...');
+      setStatusMessage('Validando QR...');
 
-      const result = await scanMemberAccess(payload);
-      navigateToResult(result);
+      const parsed = parseQrPayload(payload);
+
+      if (parsed.kind === 'wallet_credit_qr') {
+        if (!creditsConfig.isValid) {
+          navigateToStatus(
+            'Configuración incompleta',
+            creditsConfig.errorMessage ??
+              'Configurá EXPO_PUBLIC_CREDITS_API_BASE_URL y EXPO_PUBLIC_SCANNER_API_TOKEN.',
+          );
+          setIsProcessing(false);
+          setStatusMessage(null);
+          return;
+        }
+
+        const preview = await previewWalletCreditQr(parsed.payload, DEFAULT_CREDIT_AMOUNT);
+
+        if (!preview.ok) {
+          navigateToStatus('QR de créditos', preview.message);
+          setIsProcessing(false);
+          setStatusMessage(null);
+          return;
+        }
+
+        router.push({
+          pathname: '/credits/preview',
+          params: {
+            walletPayload: JSON.stringify(parsed.payload),
+            previewData: JSON.stringify(preview.data),
+          },
+        });
+        return;
+      }
+
+      if (parsed.kind === 'member_qr') {
+        navigateToStatus(
+          'QR de socio detectado',
+          'Integración vmServer pendiente. Usá ingreso manual si tenés configurado CheckSocios.',
+        );
+        setIsProcessing(false);
+        setStatusMessage(null);
+        return;
+      }
+
+      navigateToStatus(
+        'QR no reconocido',
+        'Este código no corresponde a un QR de billetera de créditos ni a un carnet de socio reconocido.',
+      );
+      setIsProcessing(false);
+      setStatusMessage(null);
     },
-    [isProcessing, navigateToResult],
+    [creditsConfig.errorMessage, creditsConfig.isValid, isProcessing, navigateToStatus, router],
   );
 
   if (!permission) {
@@ -90,7 +138,7 @@ export function ScannerScreen() {
             Permiso de cámara
           </ThemedText>
           <ThemedText themeColor="textSecondary" style={styles.centerText}>
-            CheckSocios necesita acceso a la cámara para escanear códigos QR de socios.
+            El scanner necesita acceso a la cámara para leer códigos QR.
           </ThemedText>
           <PrimaryButton label="Conceder permiso" onPress={requestPermission} />
         </SafeAreaView>
@@ -106,7 +154,7 @@ export function ScannerScreen() {
           facing="back"
           barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
           onBarcodeScanned={
-            isProcessing || !config.isValid
+            isProcessing
               ? undefined
               : ({ data }) => {
                   void handleScan(data);
@@ -120,7 +168,7 @@ export function ScannerScreen() {
       <SafeAreaView style={styles.overlay} pointerEvents="box-none">
         <View style={styles.header}>
           <ThemedText type="subtitle" style={styles.headerTitle}>
-            CheckSocios 2.0
+            Scanner Villa Mitre
           </ThemedText>
           <PrimaryButton
             label="Configuración"
@@ -129,11 +177,11 @@ export function ScannerScreen() {
           />
         </View>
 
-        {!config.isValid ? (
+        {!creditsConfig.isValid ? (
           <ThemedView type="backgroundElement" style={styles.banner}>
-            <ThemedText type="smallBold">Configuración incompleta</ThemedText>
+            <ThemedText type="smallBold">Créditos no configurados</ThemedText>
             <ThemedText type="small" themeColor="textSecondary">
-              {config.errorMessage}
+              {creditsConfig.errorMessage}
             </ThemedText>
           </ThemedView>
         ) : null}
@@ -142,10 +190,10 @@ export function ScannerScreen() {
           {isProcessing ? (
             <ThemedView type="backgroundElement" style={styles.processingBanner}>
               <ActivityIndicator />
-              <ThemedText type="smallBold">{statusMessage ?? 'Validando...'}</ThemedText>
+              <ThemedText type="smallBold">{statusMessage ?? 'Validando QR...'}</ThemedText>
             </ThemedView>
           ) : (
-            <ThemedText style={styles.hint}>Apuntá al código QR del socio</ThemedText>
+            <ThemedText style={styles.hint}>Escaneá el QR de billetera</ThemedText>
           )}
 
           <PrimaryButton
