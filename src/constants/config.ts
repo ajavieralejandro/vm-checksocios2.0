@@ -1,7 +1,9 @@
 export {
   apiBaseUrl,
   appVersion,
+  buildCheckSociosScanUrl,
   creditsApiBaseUrl,
+  getCheckSociosScanUrl,
   getCreditsConsumeUrl,
   getCreditsPreviewUrl,
   getMemberAccessScanUrl,

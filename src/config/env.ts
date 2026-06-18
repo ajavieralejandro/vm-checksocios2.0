@@ -100,3 +100,17 @@ export function getMemberAccessScanUrl(): string {
   const base = vmServerApiBaseUrl!.replace(/\/+$/, '');
   return `${base}/api/club-scanner/member-access/scan`;
 }
+
+export function buildCheckSociosScanUrl(baseUrl: string): string {
+  const base = baseUrl.replace(/\/+$/, '');
+
+  if (base.endsWith('/api')) {
+    return `${base}/checksocios/scan`;
+  }
+
+  return `${base}/api/checksocios/scan`;
+}
+
+export function getCheckSociosScanUrl(): string {
+  return buildCheckSociosScanUrl(vmServerApiBaseUrl!);
+}

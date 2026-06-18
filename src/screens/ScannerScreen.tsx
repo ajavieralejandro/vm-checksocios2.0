@@ -7,10 +7,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { validateCreditsConfig } from '@/config/env';
+import { validateCreditsConfig, validateMemberConfig } from '@/config/env';
 import { Spacing } from '@/constants/theme';
 import { previewWalletCreditQr } from '@/scanner/api/creditsScannerApi';
+import { validateMemberQr } from '@/scanner/api/memberScannerApi';
 import { parseQrPayload } from '@/scanner/qr/parseQrPayload';
+import type { MemberAccessScanResponse } from '@/types/scanner';
 
 const SCAN_DEBOUNCE_MS = 2_500;
 const DEFAULT_CREDIT_AMOUNT = 1;
@@ -24,6 +26,7 @@ export function ScannerScreen() {
   const lastScanRef = useRef<{ payload: string; timestamp: number } | null>(null);
 
   const creditsConfig = validateCreditsConfig();
+  const memberConfig = validateMemberConfig();
 
   useFocusEffect(
     useCallback(() => {
@@ -36,6 +39,16 @@ export function ScannerScreen() {
         setIsFocused(false);
       };
     }, []),
+  );
+
+  const navigateToResult = useCallback(
+    (result: MemberAccessScanResponse) => {
+      router.push({
+        pathname: '/result',
+        params: { payload: JSON.stringify(result) },
+      });
+    },
+    [router],
   );
 
   const navigateToStatus = useCallback(
@@ -103,12 +116,20 @@ export function ScannerScreen() {
       }
 
       if (parsed.kind === 'member_qr') {
-        navigateToStatus(
-          'QR de socio detectado',
-          'Integración vmServer pendiente. Usá ingreso manual si tenés configurado CheckSocios.',
-        );
-        setIsProcessing(false);
-        setStatusMessage(null);
+        if (!memberConfig.isValid) {
+          navigateToStatus(
+            'Configuración incompleta',
+            memberConfig.errorMessage ??
+              'Configurá EXPO_PUBLIC_VMSERVER_API_BASE_URL para validar socios.',
+          );
+          setIsProcessing(false);
+          setStatusMessage(null);
+          return;
+        }
+
+        setStatusMessage('Validando ingreso...');
+        const result = await validateMemberQr(parsed.raw);
+        navigateToResult(result);
         return;
       }
 
@@ -119,7 +140,7 @@ export function ScannerScreen() {
       setIsProcessing(false);
       setStatusMessage(null);
     },
-    [creditsConfig.errorMessage, creditsConfig.isValid, isProcessing, navigateToStatus, router],
+    [creditsConfig.errorMessage, creditsConfig.isValid, isProcessing, memberConfig.errorMessage, memberConfig.isValid, navigateToResult, navigateToStatus, router],
   );
 
   if (!permission) {

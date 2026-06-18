@@ -1,14 +1,28 @@
 import type { WalletCreditQrPayload } from '@/types/credits';
 
+export type MemberScanKind = 'dni' | 'barcode';
+
+export type ClassifiedMemberScan =
+  | {
+      scanKind: 'dni';
+      raw: string;
+      dni: string;
+    }
+  | {
+      scanKind: 'barcode';
+      raw: string;
+      barcode: string;
+    };
+
 export type ParsedQrPayload =
   | {
       kind: 'wallet_credit_qr';
       payload: WalletCreditQrPayload;
     }
-  | {
+  | ({
       kind: 'member_qr';
       raw: string;
-    }
+    } & ClassifiedMemberScan)
   | {
       kind: 'unknown';
       raw: string;
@@ -39,17 +53,37 @@ function parseWalletCreditQr(value: Record<string, unknown>): WalletCreditQrPayl
   };
 }
 
-function looksLikeMemberDni(raw: string): boolean {
-  if (!/^[\d.\s-]+$/.test(raw)) {
-    return false;
+/** "36.329.083" → "36329083" */
+export function normalizeDni(value: string): string | null {
+  const digits = value.replace(/[.\s-]/g, '');
+  if (/^\d{7,8}$/.test(digits)) {
+    return digits;
   }
 
-  const digits = raw.replace(/[.\s-]/g, '');
-  return /^\d{7,8}$/.test(digits);
+  return null;
 }
 
-function looksLikeMemberBarcode(raw: string): boolean {
-  return /^\d{9,}$/.test(raw);
+export function classifyMemberScan(raw: string): ClassifiedMemberScan | null {
+  const trimmed = raw.trim();
+  const dni = normalizeDni(trimmed);
+
+  if (dni) {
+    return {
+      scanKind: 'dni',
+      raw: trimmed,
+      dni,
+    };
+  }
+
+  if (/^\d{9,}$/.test(trimmed)) {
+    return {
+      scanKind: 'barcode',
+      raw: trimmed,
+      barcode: trimmed,
+    };
+  }
+
+  return null;
 }
 
 export function parseQrPayload(raw: string): ParsedQrPayload {
@@ -75,8 +109,12 @@ export function parseQrPayload(raw: string): ParsedQrPayload {
     // Not JSON — evaluate as carnet / barcode heuristics below.
   }
 
-  if (looksLikeMemberDni(trimmed) || looksLikeMemberBarcode(trimmed)) {
-    return { kind: 'member_qr', raw: trimmed };
+  const memberScan = classifyMemberScan(trimmed);
+  if (memberScan) {
+    return {
+      kind: 'member_qr',
+      ...memberScan,
+    };
   }
 
   return { kind: 'unknown', raw: trimmed };
