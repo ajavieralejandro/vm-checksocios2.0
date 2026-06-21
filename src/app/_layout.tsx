@@ -12,6 +12,7 @@ export default function RootLayout() {
         <Stack.Screen name="result" />
         <Stack.Screen name="status" />
         <Stack.Screen name="credits/preview" />
+        <Stack.Screen name="credits/reservation-preview" />
         <Stack.Screen name="settings" />
       </Stack>
     </>

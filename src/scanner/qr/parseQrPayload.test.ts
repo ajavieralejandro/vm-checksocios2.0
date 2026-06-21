@@ -18,6 +18,74 @@ describe('parseQrPayload', () => {
         version: 1,
         token: 'abc123',
       },
+      raw,
+    });
+  });
+
+  it('detects a valid credit_reservation_qr JSON payload', () => {
+    const raw = JSON.stringify({
+      type: 'credit_reservation_qr',
+      version: 1,
+      reservation_id: 123,
+      token: 'res-token',
+    });
+
+    expect(parseQrPayload(raw)).toEqual({
+      kind: 'credit_reservation_qr',
+      payload: {
+        type: 'credit_reservation_qr',
+        version: 1,
+        reservation_id: 123,
+        token: 'res-token',
+      },
+      raw,
+    });
+  });
+
+  it('detects a valid URL-encoded credit_reservation_qr JSON payload', () => {
+    const json = JSON.stringify({
+      type: 'credit_reservation_qr',
+      version: 1,
+      token: 'res-token-encoded',
+    });
+    const raw = encodeURIComponent(json);
+
+    expect(parseQrPayload(raw)).toEqual({
+      kind: 'credit_reservation_qr',
+      payload: {
+        type: 'credit_reservation_qr',
+        version: 1,
+        token: 'res-token-encoded',
+      },
+      raw,
+    });
+  });
+
+  it('detects a valid URL-encoded wallet_credit_qr JSON payload', () => {
+    const json = JSON.stringify({
+      type: 'wallet_credit_qr',
+      version: 1,
+      token: 'uuid-token-123',
+    });
+    const raw = encodeURIComponent(json);
+
+    expect(parseQrPayload(raw)).toEqual({
+      kind: 'wallet_credit_qr',
+      payload: {
+        type: 'wallet_credit_qr',
+        version: 1,
+        token: 'uuid-token-123',
+      },
+      raw,
+    });
+  });
+
+  it('returns unknown for invalid URL-encoded JSON content', () => {
+    const raw = encodeURIComponent('{not-json');
+
+    expect(parseQrPayload(raw)).toEqual({
+      kind: 'unknown',
+      raw,
     });
   });
 
@@ -35,12 +103,21 @@ describe('parseQrPayload', () => {
     });
   });
 
-  it('detects formatted member DNI as member_qr', () => {
+  it('does not treat formatted DNI as wallet credit QR', () => {
     expect(parseQrPayload('36.329.083')).toEqual({
       kind: 'member_qr',
       raw: '36.329.083',
       scanKind: 'dni',
       dni: '36329083',
+    });
+  });
+
+  it('does not treat plain numeric DNI as wallet credit QR', () => {
+    expect(parseQrPayload('12345678')).toEqual({
+      kind: 'member_qr',
+      raw: '12345678',
+      scanKind: 'dni',
+      dni: '12345678',
     });
   });
 
@@ -59,15 +136,6 @@ describe('parseQrPayload', () => {
       raw: '123456789012',
       scanKind: 'barcode',
       barcode: '123456789012',
-    });
-  });
-
-  it('does not treat plain numeric DNI as wallet credit QR', () => {
-    expect(parseQrPayload('12345678')).toEqual({
-      kind: 'member_qr',
-      raw: '12345678',
-      scanKind: 'dni',
-      dni: '12345678',
     });
   });
 });

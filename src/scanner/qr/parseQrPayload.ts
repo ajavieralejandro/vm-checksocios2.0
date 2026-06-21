@@ -1,4 +1,5 @@
 import type { WalletCreditQrPayload } from '@/types/credits';
+import type { CreditReservationQrPayload } from '@/types/creditReservation';
 
 export type MemberScanKind = 'dni' | 'barcode';
 
@@ -18,6 +19,12 @@ export type ParsedQrPayload =
   | {
       kind: 'wallet_credit_qr';
       payload: WalletCreditQrPayload;
+      raw: string;
+    }
+  | {
+      kind: 'credit_reservation_qr';
+      payload: CreditReservationQrPayload;
+      raw: string;
     }
   | ({
       kind: 'member_qr';
@@ -32,8 +39,39 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+/** Trim whitespace from scanned QR content. */
+export function normalizeQrRaw(raw: string): string {
+  return raw.trim();
+}
+
+/** Try JSON.parse on raw, then decodeURIComponent + JSON.parse. */
+export function tryParseJson(raw: string): unknown | null {
+  const trimmed = normalizeQrRaw(raw);
+
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    // Fall through to URL-decoded parse.
+  }
+
+  try {
+    const decoded = decodeURIComponent(trimmed);
+    return JSON.parse(decoded);
+  } catch {
+    return null;
+  }
+}
+
 function parseWalletCreditQr(value: Record<string, unknown>): WalletCreditQrPayload | null {
   if (value.type !== 'wallet_credit_qr') {
+    return null;
+  }
+
+  if (value.version !== 1) {
     return null;
   }
 
@@ -41,15 +79,38 @@ function parseWalletCreditQr(value: Record<string, unknown>): WalletCreditQrPayl
     return null;
   }
 
-  const version =
-    typeof value.version === 'number' && Number.isFinite(value.version)
-      ? value.version
-      : 1;
-
   return {
     type: 'wallet_credit_qr',
-    version,
+    version: 1,
     token: value.token.trim(),
+  };
+}
+
+export function parseCreditReservationQr(
+  value: Record<string, unknown>,
+): CreditReservationQrPayload | null {
+  if (value.type !== 'credit_reservation_qr') {
+    return null;
+  }
+
+  if (value.version !== 1) {
+    return null;
+  }
+
+  if (typeof value.token !== 'string' || value.token.trim().length === 0) {
+    return null;
+  }
+
+  const reservationId =
+    typeof value.reservation_id === 'number' && Number.isFinite(value.reservation_id)
+      ? value.reservation_id
+      : undefined;
+
+  return {
+    type: 'credit_reservation_qr',
+    version: 1,
+    token: value.token.trim(),
+    ...(reservationId !== undefined ? { reservation_id: reservationId } : {}),
   };
 }
 
@@ -64,7 +125,7 @@ export function normalizeDni(value: string): string | null {
 }
 
 export function classifyMemberScan(raw: string): ClassifiedMemberScan | null {
-  const trimmed = raw.trim();
+  const trimmed = normalizeQrRaw(raw);
   const dni = normalizeDni(trimmed);
 
   if (dni) {
@@ -87,26 +148,32 @@ export function classifyMemberScan(raw: string): ClassifiedMemberScan | null {
 }
 
 export function parseQrPayload(raw: string): ParsedQrPayload {
-  const trimmed = raw.trim();
+  const trimmed = normalizeQrRaw(raw);
 
   if (trimmed.length === 0) {
     return { kind: 'unknown', raw: trimmed };
   }
 
-  try {
-    const parsed: unknown = JSON.parse(trimmed);
+  const parsed = tryParseJson(trimmed);
 
-    if (isRecord(parsed)) {
-      const walletPayload = parseWalletCreditQr(parsed);
-      if (walletPayload) {
-        return {
-          kind: 'wallet_credit_qr',
-          payload: walletPayload,
-        };
-      }
+  if (isRecord(parsed)) {
+    const reservationPayload = parseCreditReservationQr(parsed);
+    if (reservationPayload) {
+      return {
+        kind: 'credit_reservation_qr',
+        payload: reservationPayload,
+        raw: trimmed,
+      };
     }
-  } catch {
-    // Not JSON — evaluate as carnet / barcode heuristics below.
+
+    const walletPayload = parseWalletCreditQr(parsed);
+    if (walletPayload) {
+      return {
+        kind: 'wallet_credit_qr',
+        payload: walletPayload,
+        raw: trimmed,
+      };
+    }
   }
 
   const memberScan = classifyMemberScan(trimmed);

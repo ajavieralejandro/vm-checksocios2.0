@@ -8,7 +8,10 @@ import { ThemedView } from '@/components/themed-view';
 import {
   appVersion,
   creditsApiBaseUrl,
-  scannerApiToken,
+  creditsPreviewUrl,
+  hasScannerToken,
+  missingCreditsEnvVars,
+  SCANNER_POINT_ENV_KEY,
   scannerPoint,
   validateCreditsConfig,
   validateMemberConfig,
@@ -25,16 +28,8 @@ function ConfigRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function maskToken(token: string | undefined): string {
-  if (!token) {
-    return '(no configurado)';
-  }
-
-  if (token.length <= 8) {
-    return '********';
-  }
-
-  return `${token.slice(0, 4)}...${token.slice(-4)}`;
+function tokenStatus(configured: boolean): string {
+  return configured ? 'Configurado' : 'No configurado';
 }
 
 export function SettingsScreen() {
@@ -54,6 +49,11 @@ export function SettingsScreen() {
           {!creditsConfig.isValid ? (
             <ThemedView style={styles.warningBox}>
               <ThemedText type="smallBold">Créditos</ThemedText>
+              {creditsConfig.missingEnvVars && creditsConfig.missingEnvVars.length > 0 ? (
+                <ThemedText type="small" themeColor="textSecondary">
+                  Faltan: {creditsConfig.missingEnvVars.join(', ')}
+                </ThemedText>
+              ) : null}
               <ThemedText type="small" themeColor="textSecondary">
                 {creditsConfig.errorMessage}
               </ThemedText>
@@ -71,17 +71,27 @@ export function SettingsScreen() {
 
           <ThemedText type="smallBold">Créditos (vm-creditos-api)</ThemedText>
           <ConfigRow
-            label="Credits API base URL"
+            label="Credits API Base URL"
             value={creditsApiBaseUrl ?? '(no configurada)'}
           />
-          <ConfigRow label="Scanner API token" value={maskToken(scannerApiToken)} />
+          <ConfigRow
+            label="Preview endpoint"
+            value={creditsPreviewUrl ?? '(no configurado)'}
+          />
+          <ConfigRow label={SCANNER_POINT_ENV_KEY} value={scannerPoint} />
+          <ConfigRow label="Scanner token" value={tokenStatus(hasScannerToken)} />
+
+          {missingCreditsEnvVars.length > 0 ? (
+            <ThemedText type="small" themeColor="textSecondary">
+              Variables faltantes: {missingCreditsEnvVars.join(', ')}
+            </ThemedText>
+          ) : null}
 
           <ThemedText type="smallBold">Socios (vmServer)</ThemedText>
           <ConfigRow
             label="vmServer API base URL"
             value={vmServerApiBaseUrl ?? '(no configurada)'}
           />
-          <ConfigRow label="Punto de acceso" value={scannerPoint} />
           <ConfigRow label="Versión de la app" value={appVersion} />
         </ScrollView>
 

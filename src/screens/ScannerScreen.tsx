@@ -9,7 +9,8 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { validateCreditsConfig, validateMemberConfig } from '@/config/env';
 import { Spacing } from '@/constants/theme';
-import { previewWalletCreditQr } from '@/scanner/api/creditsScannerApi';
+import { previewWalletCreditQrWithReservationFallback } from '@/scanner/api/creditsScannerApi';
+import { previewCreditReservationQr } from '@/scanner/api/creditReservationScannerApi';
 import { validateMemberQr } from '@/scanner/api/memberScannerApi';
 import { parseQrPayload } from '@/scanner/qr/parseQrPayload';
 import type { MemberAccessScanResponse } from '@/types/scanner';
@@ -84,24 +85,67 @@ export function ScannerScreen() {
 
       const parsed = parseQrPayload(payload);
 
-      if (parsed.kind === 'wallet_credit_qr') {
+      if (parsed.kind === 'credit_reservation_qr') {
         if (!creditsConfig.isValid) {
-          navigateToStatus(
-            'Configuración incompleta',
-            creditsConfig.errorMessage ??
-              'Configurá EXPO_PUBLIC_CREDITS_API_BASE_URL y EXPO_PUBLIC_SCANNER_API_TOKEN.',
-          );
+          navigateToStatus('Configuración incompleta', creditsConfig.errorMessage ?? '');
           setIsProcessing(false);
           setStatusMessage(null);
           return;
         }
 
-        const preview = await previewWalletCreditQr(parsed.payload, DEFAULT_CREDIT_AMOUNT);
+        const preview = await previewCreditReservationQr(parsed.payload);
 
         if (!preview.ok) {
+          navigateToStatus('QR de reserva', preview.message);
+          setIsProcessing(false);
+          setStatusMessage(null);
+          return;
+        }
+
+        router.push({
+          pathname: '/credits/reservation-preview',
+          params: {
+            reservationPayload: JSON.stringify(parsed.payload),
+            previewData: JSON.stringify(preview.data),
+            rawScan: payload,
+          },
+        });
+        return;
+      }
+
+      if (parsed.kind === 'wallet_credit_qr') {
+        if (!creditsConfig.isValid) {
+          navigateToStatus('Configuración incompleta', creditsConfig.errorMessage ?? '');
+          setIsProcessing(false);
+          setStatusMessage(null);
+          return;
+        }
+
+        const preview = await previewWalletCreditQrWithReservationFallback(
+          parsed.payload,
+          DEFAULT_CREDIT_AMOUNT,
+        );
+
+        if (preview.kind === 'error') {
           navigateToStatus('QR de créditos', preview.message);
           setIsProcessing(false);
           setStatusMessage(null);
+          return;
+        }
+
+        if (preview.kind === 'reservation') {
+          router.push({
+            pathname: '/credits/reservation-preview',
+            params: {
+              reservationPayload: JSON.stringify({
+                type: 'credit_reservation_qr',
+                version: 1,
+                token: parsed.payload.token,
+              }),
+              previewData: JSON.stringify(preview.data),
+              rawScan: payload,
+            },
+          });
           return;
         }
 
@@ -110,6 +154,7 @@ export function ScannerScreen() {
           params: {
             walletPayload: JSON.stringify(parsed.payload),
             previewData: JSON.stringify(preview.data),
+            rawScan: payload,
           },
         });
         return;
@@ -135,7 +180,7 @@ export function ScannerScreen() {
 
       navigateToStatus(
         'QR no reconocido',
-        'Este código no corresponde a un QR de billetera de créditos ni a un carnet de socio reconocido.',
+        'Este código no corresponde a un QR de billetera, reserva o carnet de socio reconocido.',
       );
       setIsProcessing(false);
       setStatusMessage(null);
@@ -214,7 +259,7 @@ export function ScannerScreen() {
               <ThemedText type="smallBold">{statusMessage ?? 'Validando QR...'}</ThemedText>
             </ThemedView>
           ) : (
-            <ThemedText style={styles.hint}>Escaneá el QR de billetera</ThemedText>
+            <ThemedText style={styles.hint}>Escaneá QR de billetera o reserva</ThemedText>
           )}
 
           <PrimaryButton

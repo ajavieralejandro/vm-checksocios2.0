@@ -8,14 +8,17 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { ScanStatusColors, Spacing } from '@/constants/theme';
 import {
-  consumeWalletCreditQr,
-  getCreditsErrorMessage,
-} from '@/scanner/api/creditsScannerApi';
-import type { WalletCreditQrPayload } from '@/scanner/qr/parseQrPayload';
-import type { CreditsFlowPhase, CreditsPreviewData } from '@/types/credits';
+  checkInCreditReservationQr,
+  getReservationErrorMessage,
+} from '@/scanner/api/creditReservationScannerApi';
+import type { CreditReservationQrPayload } from '@/types/creditReservation';
+import type {
+  CreditReservationFlowPhase,
+  CreditReservationPreviewData,
+} from '@/types/creditReservation';
 
 type PreviewRouteParams = {
-  walletPayload?: string;
+  reservationPayload?: string;
   previewData?: string;
   rawScan?: string;
 };
@@ -37,55 +40,40 @@ function generateIdempotencyKey(): string {
     return globalThis.crypto.randomUUID();
   }
 
-  return `consume-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return `checkin-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function getPhaseAccent(phase: CreditsFlowPhase): string {
-  switch (phase) {
-    case 'approved':
-      return ScanStatusColors.allowed;
-    case 'rejected':
-      return ScanStatusColors.rejected;
-    case 'error':
-      return ScanStatusColors.neutral;
-    default:
-      return ScanStatusColors.warning;
-  }
-}
-
-export function CreditsPreviewScreen() {
+export function CreditReservationPreviewScreen() {
   const router = useRouter();
-  const { walletPayload, previewData, rawScan } = useLocalSearchParams<PreviewRouteParams>();
-  const consumeStartedRef = useRef(false);
+  const { reservationPayload, previewData, rawScan } =
+    useLocalSearchParams<PreviewRouteParams>();
+  const checkInStartedRef = useRef(false);
 
-  const wallet = useMemo(
-    () => parseJsonParam<WalletCreditQrPayload>(walletPayload),
-    [walletPayload],
+  const reservation = useMemo(
+    () => parseJsonParam<CreditReservationQrPayload>(reservationPayload),
+    [reservationPayload],
   );
   const preview = useMemo(
-    () => parseJsonParam<CreditsPreviewData>(previewData),
+    () => parseJsonParam<CreditReservationPreviewData>(previewData),
     [previewData],
   );
 
-  const [phase, setPhase] = useState<CreditsFlowPhase>('preview');
+  const [phase, setPhase] = useState<CreditReservationFlowPhase>('preview');
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [transactionId, setTransactionId] = useState<string | undefined>();
-  const [newBalance, setNewBalance] = useState<number | undefined>();
 
-  const amount = preview?.amount ?? 1;
-  const canConfirm = preview?.canConsume === true && phase === 'preview';
+  const canConfirm = preview?.canCheckIn === true && phase === 'preview';
 
-  const handleConfirmConsume = useCallback(async () => {
-    if (!wallet || !preview || !canConfirm || consumeStartedRef.current) {
+  const handleConfirmCheckIn = useCallback(async () => {
+    if (!reservation || !preview || !canConfirm || checkInStartedRef.current) {
       return;
     }
 
-    consumeStartedRef.current = true;
-    setPhase('consuming');
-    setStatusMessage('Procesando consumo...');
+    checkInStartedRef.current = true;
+    setPhase('checking_in');
+    setStatusMessage('Confirmando ingreso...');
 
     const idempotencyKey = generateIdempotencyKey();
-    const result = await consumeWalletCreditQr(wallet, amount, idempotencyKey);
+    const result = await checkInCreditReservationQr(reservation, idempotencyKey);
 
     if (!result.ok) {
       setPhase('error');
@@ -93,41 +81,44 @@ export function CreditsPreviewScreen() {
       return;
     }
 
-    if (result.data.approved) {
-      setPhase('approved');
-      setTransactionId(result.data.transactionId);
-      setNewBalance(result.data.newBalance);
-      setStatusMessage('Transacción aprobada');
+    if (result.data.checkedIn) {
+      setPhase('checked_in');
+      setStatusMessage('Ingreso confirmado');
       return;
     }
 
     const reasonCode = result.data.reasonCode ?? 'unknown_error';
     setPhase('rejected');
-    setStatusMessage(result.data.reason ?? getCreditsErrorMessage(reasonCode));
-  }, [amount, canConfirm, preview, wallet]);
+    setStatusMessage(result.data.reason ?? getReservationErrorMessage(reasonCode));
+  }, [canConfirm, preview, reservation]);
 
-  if (!wallet || !preview) {
+  if (!reservation || !preview) {
     return (
       <ThemedView style={styles.container}>
         <SafeAreaView style={styles.safeArea}>
           <ThemedText type="subtitle">Preview no disponible</ThemedText>
           <ThemedText themeColor="textSecondary">
-            No se recibieron datos del QR. Volvé al escáner e intentá de nuevo.
+            No se recibieron datos del QR de reserva. Volvé al escáner e intentá de nuevo.
           </ThemedText>
-          <PrimaryButton label="Escanear de nuevo" onPress={() => router.replace('/')} />
+          <PrimaryButton label="Escanear otro" onPress={() => router.replace('/')} />
         </SafeAreaView>
       </ThemedView>
     );
   }
 
-  const accent = getPhaseAccent(phase);
-  const isProcessing = phase === 'consuming';
+  const isProcessing = phase === 'checking_in';
+  const accent =
+    phase === 'checked_in'
+      ? ScanStatusColors.allowed
+      : phase === 'rejected' || phase === 'error'
+        ? ScanStatusColors.rejected
+        : ScanStatusColors.warning;
 
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.content}>
-          <ThemedText type="subtitle">QR de créditos detectado</ThemedText>
+          <ThemedText type="subtitle">QR de reserva detectado</ThemedText>
 
           {__DEV__ && rawScan ? (
             <ThemedView type="backgroundElement" style={styles.debugBox}>
@@ -136,10 +127,7 @@ export function CreditsPreviewScreen() {
                 Raw: {rawScan}
               </ThemedText>
               <ThemedText type="small" themeColor="textSecondary">
-                Parseado: wallet_credit_qr
-              </ThemedText>
-              <ThemedText type="small" themeColor="textSecondary" selectable>
-                Token: {wallet.token}
+                Parseado: credit_reservation_qr
               </ThemedText>
             </ThemedView>
           ) : null}
@@ -149,7 +137,7 @@ export function CreditsPreviewScreen() {
             <View style={styles.cardBody}>
               {phase === 'preview' ? (
                 <ThemedText type="smallBold" themeColor="textSecondary">
-                  Preview
+                  Preview reserva
                 </ThemedText>
               ) : null}
 
@@ -160,50 +148,48 @@ export function CreditsPreviewScreen() {
                 </ThemedText>
               ) : null}
 
-              {typeof preview.balance === 'number' ? (
+              {preview.activity ? (
                 <ThemedText style={styles.detail}>
-                  <ThemedText type="smallBold">Saldo: </ThemedText>
-                  {preview.balance}
+                  <ThemedText type="smallBold">Actividad: </ThemedText>
+                  {preview.activity}
                 </ThemedText>
               ) : null}
 
-              <ThemedText style={styles.detail}>
-                <ThemedText type="smallBold">Cantidad: </ThemedText>
-                {amount}
-              </ThemedText>
+              {preview.scheduledAt ? (
+                <ThemedText style={styles.detail}>
+                  <ThemedText type="smallBold">Fecha/hora: </ThemedText>
+                  {preview.scheduledAt}
+                </ThemedText>
+              ) : null}
 
-              <ThemedText style={styles.detail}>
-                <ThemedText type="smallBold">Puede consumir: </ThemedText>
-                {preview.canConsume ? 'Sí' : 'No'}
-              </ThemedText>
+              {typeof preview.creditsUsed === 'number' ? (
+                <ThemedText style={styles.detail}>
+                  <ThemedText type="smallBold">Créditos utilizados: </ThemedText>
+                  {preview.creditsUsed}
+                </ThemedText>
+              ) : null}
 
-              {phase === 'preview' && !preview.canConsume ? (
+              {preview.status ? (
+                <ThemedText style={styles.detail}>
+                  <ThemedText type="smallBold">Estado: </ThemedText>
+                  {preview.status}
+                </ThemedText>
+              ) : null}
+
+              {phase === 'preview' && !preview.canCheckIn ? (
                 <ThemedText style={styles.warningText}>
-                  {preview.reasonCode === 'insufficient_balance' ||
-                  preview.reason?.toLowerCase().includes('insufficient')
-                    ? 'Saldo insuficiente'
-                    : (preview.reason ?? 'No se puede consumir con este QR.')}
+                  {preview.reasonCode === 'already_checked_in'
+                    ? 'La reserva ya fue registrada'
+                    : (preview.reason ?? 'No se puede confirmar el ingreso.')}
                 </ThemedText>
               ) : null}
 
-              {phase === 'approved' ? (
+              {phase === 'checked_in' ? (
                 <>
-                  <ThemedText type="subtitle" style={styles.approvedTitle}>
-                    APROBADO
+                  <ThemedText type="subtitle" style={styles.successTitle}>
+                    INGRESO CONFIRMADO
                   </ThemedText>
                   <ThemedText style={styles.detail}>{statusMessage}</ThemedText>
-                  {transactionId ? (
-                    <ThemedText style={styles.detail}>
-                      <ThemedText type="smallBold">Transacción: </ThemedText>
-                      {transactionId}
-                    </ThemedText>
-                  ) : null}
-                  {typeof newBalance === 'number' ? (
-                    <ThemedText style={styles.detail}>
-                      <ThemedText type="smallBold">Nuevo saldo: </ThemedText>
-                      {newBalance}
-                    </ThemedText>
-                  ) : null}
                 </>
               ) : null}
 
@@ -217,17 +203,17 @@ export function CreditsPreviewScreen() {
         <View style={styles.actions}>
           {phase === 'preview' && canConfirm ? (
             <PrimaryButton
-              label={`Consumir ${amount} crédito${amount === 1 ? '' : 's'}`}
+              label="Confirmar ingreso"
               loading={isProcessing}
               disabled={isProcessing}
               onPress={() => {
-                void handleConfirmConsume();
+                void handleConfirmCheckIn();
               }}
             />
           ) : null}
 
           <PrimaryButton
-            label="Escanear de nuevo"
+            label="Escanear otro"
             variant="secondary"
             disabled={isProcessing}
             onPress={() => router.replace('/')}
@@ -274,7 +260,7 @@ const styles = StyleSheet.create({
     color: '#DC2626',
     lineHeight: 22,
   },
-  approvedTitle: {
+  successTitle: {
     color: ScanStatusColors.allowed,
   },
   actions: {

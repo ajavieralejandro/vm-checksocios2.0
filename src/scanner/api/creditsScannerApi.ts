@@ -1,9 +1,13 @@
 import {
-  getCreditsConsumeUrl,
-  getCreditsPreviewUrl,
-  scannerApiToken,
-  validateCreditsConfig,
-} from '@/config/env';
+  postWalletCreditConsume,
+  postWalletCreditPreview,
+} from '@/services/creditsScannerService';
+import { validateCreditsConfig } from '@/config/env';
+import {
+  isReservationMisroutedResponse,
+  previewCreditReservationByToken,
+} from '@/scanner/api/creditReservationScannerApi';
+import type { CreditReservationPreviewData } from '@/types/creditReservation';
 import type {
   CreditsConsumeData,
   CreditsConsumeResult,
@@ -12,8 +16,6 @@ import type {
   CreditsPreviewResult,
   WalletCreditQrPayload,
 } from '@/types/credits';
-
-const REQUEST_TIMEOUT_MS = 15_000;
 
 const ERROR_CODE_ALIASES: Record<string, CreditsErrorCode> = {
   invalid_qr: 'invalid_qr',
@@ -57,77 +59,6 @@ export function getCreditsErrorMessage(code: CreditsErrorCode): string {
 }
 
 type CreditsApiResponse = Record<string, unknown>;
-
-async function postCreditsScanner<T>(
-  url: string,
-  body: unknown,
-): Promise<{ ok: true; data: T } | { ok: false; status: number; parsed: CreditsApiResponse | null }> {
-  const config = validateCreditsConfig();
-  if (!config.isValid) {
-    return {
-      ok: false,
-      status: 0,
-      parsed: { message: config.errorMessage, code: 'unknown_error' },
-    };
-  }
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${scannerApiToken}`,
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-
-    const rawText = await response.text();
-    let parsed: CreditsApiResponse | null = null;
-
-    if (rawText.length > 0) {
-      try {
-        const json: unknown = JSON.parse(rawText);
-        parsed = typeof json === 'object' && json !== null ? (json as CreditsApiResponse) : null;
-      } catch {
-        parsed = { message: 'Respuesta inválida del servidor.' };
-      }
-    }
-
-    if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
-        parsed = {
-          ...(parsed ?? {}),
-          code: parsed?.code ?? 'scanner_unauthorized',
-        };
-      }
-
-      return { ok: false, status: response.status, parsed };
-    }
-
-    return { ok: true, data: (parsed ?? {}) as T };
-  } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      return {
-        ok: false,
-        status: 0,
-        parsed: { code: 'network_error', message: 'La solicitud tardó demasiado.' },
-      };
-    }
-
-    return {
-      ok: false,
-      status: 0,
-      parsed: { code: 'network_error', message: 'No se pudo conectar con el servidor.' },
-    };
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
 
 function readString(record: CreditsApiResponse, key: string): string | undefined {
   const value = record[key];
@@ -178,7 +109,10 @@ function normalizePreviewData(
       readString(record, 'member_name') ??
       readString(record, 'memberName') ??
       readString(record, 'name'),
-    balance: readNumber(record, 'balance') ?? readNumber(record, 'saldo'),
+    balance:
+      readNumber(record, 'wallet_balance') ??
+      readNumber(record, 'balance') ??
+      readNumber(record, 'saldo'),
     amount: readNumber(record, 'amount') ?? amount,
     canConsume,
     reason: readString(record, 'reason') ?? readString(record, 'message'),
@@ -199,7 +133,9 @@ function normalizeConsumeData(record: CreditsApiResponse): CreditsConsumeData {
     transactionId:
       readString(record, 'transaction_id') ?? readString(record, 'transactionId'),
     newBalance:
-      readNumber(record, 'new_balance') ?? readNumber(record, 'newBalance'),
+      readNumber(record, 'new_balance') ??
+      readNumber(record, 'newBalance') ??
+      readNumber(record, 'wallet_balance'),
     reason: readString(record, 'reason') ?? readString(record, 'message'),
     reasonCode: approved ? undefined : reasonCode,
   };
@@ -218,12 +154,7 @@ export async function previewWalletCreditQr(
     };
   }
 
-  const response = await postCreditsScanner<CreditsApiResponse>(getCreditsPreviewUrl(), {
-    type: payload.type,
-    version: payload.version,
-    token: payload.token,
-    amount,
-  });
+  const response = await postWalletCreditPreview(payload, amount);
 
   if (!response.ok) {
     return buildFailure(response.parsed, 'No se pudo validar el QR de créditos.');
@@ -242,6 +173,47 @@ export async function previewWalletCreditQr(
   };
 }
 
+export async function previewWalletCreditQrWithReservationFallback(
+  payload: WalletCreditQrPayload,
+  amount = 1,
+): Promise<
+  | { kind: 'wallet'; data: CreditsPreviewData }
+  | { kind: 'reservation'; data: CreditReservationPreviewData }
+  | { kind: 'error'; message: string }
+> {
+  const response = await postWalletCreditPreview(payload, amount);
+
+  if (response.ok) {
+    const record = response.data;
+    const apiOk = readBoolean(record, 'ok');
+
+    if (apiOk !== false) {
+      return { kind: 'wallet', data: normalizePreviewData(record, amount) };
+    }
+
+    if (isReservationMisroutedResponse(record)) {
+      const reservationPreview = await previewCreditReservationByToken(payload.token);
+      if (reservationPreview.ok) {
+        return { kind: 'reservation', data: reservationPreview.data };
+      }
+    }
+
+    return { kind: 'error', message: buildFailure(record, 'No se pudo validar el QR.').message };
+  }
+
+  if (isReservationMisroutedResponse(response.parsed)) {
+    const reservationPreview = await previewCreditReservationByToken(payload.token);
+    if (reservationPreview.ok) {
+      return { kind: 'reservation', data: reservationPreview.data };
+    }
+  }
+
+  return {
+    kind: 'error',
+    message: buildFailure(response.parsed, 'No se pudo validar el QR de créditos.').message,
+  };
+}
+
 export async function consumeWalletCreditQr(
   payload: WalletCreditQrPayload,
   amount: number,
@@ -256,13 +228,7 @@ export async function consumeWalletCreditQr(
     };
   }
 
-  const response = await postCreditsScanner<CreditsApiResponse>(getCreditsConsumeUrl(), {
-    type: payload.type,
-    version: payload.version,
-    token: payload.token,
-    amount,
-    idempotency_key: idempotencyKey,
-  });
+  const response = await postWalletCreditConsume(payload, amount, idempotencyKey);
 
   if (!response.ok) {
     return buildFailure(response.parsed, 'No se pudo consumir el crédito.');
